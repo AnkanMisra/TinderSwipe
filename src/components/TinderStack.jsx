@@ -1,106 +1,78 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion';
-
-// Optional direction icons (provide your own images)
 import correctIcon from '../assets/images/correct.png';
 import wrongIcon from '../assets/images/wrong.png';
 
-// You can add more colors or change them as desired
 const COLORS = [
-  '#FF6B6B', '#6BCBFF', '#B6FF6B', '#FFD700', 
+  '#FF6B6B', '#6BCBFF', '#B6FF6B', '#FFD700',
   '#FF8C00', '#ADFF2F', '#9370DB', '#40E0D0'
 ];
 
-// Generates a new card with random color and some details
-function getRandomCard(id) {
-  const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-  return { 
-    id, 
-    color, 
-    text: `Card ${id}`,
-    details: `This is some interesting detail about Card ${id}`
-  };
+function createRandomCard(id) {
+  const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+  return { id, color: randomColor };
 }
 
-function TinderStack({ 
-  swipeThreshold = 150, 
-  visibleCount = 3,
+function TinderStack({
+  swipeThreshold = 150,
+  visibleCount = 4,
   onSwipe = () => {},
   cardWidth = 300,
-  cardHeight = 450 
+  cardHeight = 450
 }) {
-  const [cards, setCards] = useState(() => 
-    Array.from({ length: 10 }, (_, i) => getRandomCard(i + 1))
+  const [cards, setCards] = useState(() =>
+    Array.from({ length: 10 }, (_, i) => createRandomCard(i + 1))
   );
-  const [currentId, setCurrentId] = useState(11);
+  const [nextCardId, setNextCardId] = useState(11);
   const [activeSwipe, setActiveSwipe] = useState(null);
 
-  // Add a new card to the bottom of the stack
-  const addNewCard = useCallback(() => {
-    setCards(prev => [...prev, getRandomCard(currentId)]);
-    setCurrentId(prev => prev + 1);
-  }, [currentId]);
+  const addCard = useCallback(() => {
+    setCards(prev => [...prev, createRandomCard(nextCardId)]);
+    setNextCardId(prev => prev + 1);
+  }, [nextCardId]);
 
-  // The top card is the one the user can interact with
-  // If cards run low, we add new ones
   useEffect(() => {
     if (cards.length < visibleCount) {
-      addNewCard();
+      addCard();
     }
-  }, [cards, visibleCount, addNewCard]);
+  }, [cards, visibleCount, addCard]);
 
-  // Determines swipe direction based on drag offset
   const determineDirection = (offsetX, offsetY) => {
     const angle = Math.atan2(offsetY, offsetX) * (180 / Math.PI);
-    // Default direction is 'right'
     if (angle > 45 && angle <= 135) return 'down';
     if (angle < -45 && angle >= -135) return 'up';
     if (offsetX < 0) return 'left';
     return 'right';
   };
 
-  // The card component
   const TinderCard = React.memo(({ card, index, totalVisible }) => {
     const x = useMotionValue(0);
     const y = useMotionValue(0);
-
-    // Rotate card slightly as user drags horizontally
     const rotate = useTransform(x, [-cardWidth, 0, cardWidth], [-20, 0, 20]);
-    const opacity = useTransform(x, [-cardWidth, 0, cardWidth], [0.5, 1, 0.5]);
     const scale = useTransform(x, [-cardWidth, 0, cardWidth], [0.95, 1, 0.95]);
+    const stackOffset = index * 20;
+    const backScale = 1 - index * 0.05;
 
     const handleDragEnd = (_, info) => {
       const { offset } = info;
       const distanceMoved = Math.sqrt(offset.x ** 2 + offset.y ** 2);
-
       if (distanceMoved > swipeThreshold) {
-        // Determine direction of the swipe
         const direction = determineDirection(offset.x, offset.y);
         setActiveSwipe({ direction, card });
         onSwipe(direction);
-
-        // After a small delay, remove the top card and add a new one
         setTimeout(() => {
           setCards(prev => prev.slice(1));
-          addNewCard();
+          addCard();
           setActiveSwipe(null);
         }, 300);
       } else {
-        // Snap back to center if not swiped far enough
         x.set(0);
         y.set(0);
       }
     };
 
-    // Stacking effect: each subsequent card is moved down and is more transparent
-    const stackOffset = index * 20;
-    const backScale = 1 - index * 0.05;
-    const backOpacity = 1 - index * 0.1;
-
-    // Determine if we should show direction icons
-    const showWrong = x.get() < -50;   // swiping left
-    const showCorrect = x.get() > 50;  // swiping right
-    // You could also add conditions for up/down if you have icons for them.
+    const showWrongIcon = x.get() < -50;
+    const showCorrectIcon = x.get() > 50;
 
     return (
       <motion.div
@@ -117,49 +89,32 @@ function TinderStack({
           top: stackOffset,
           left: 0,
           boxShadow: '0 15px 30px rgba(0,0,0,0.2)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
           cursor: 'grab',
-          padding: '20px',
-          textAlign: 'center',
           x,
           y,
           rotate,
           scale,
-          opacity,
-          zIndex: totalVisible - index
+          zIndex: totalVisible - index,
+          border: '2px solid black'
         }}
         initial={{ 
           scale: backScale,
-          y: stackOffset,
-          opacity: backOpacity
+          y: stackOffset
         }}
         animate={{ 
           scale: backScale,
-          y: stackOffset,
-          opacity: backOpacity
+          y: stackOffset
         }}
         transition={{ 
           type: 'spring',
-          stiffness: 300,
-          damping: 20
+          stiffness: 200,
+          damping: 25
         }}
       >
-        <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>
-          {card.text}
-        </h2>
-        <p style={{ fontSize: '1rem', opacity: 0.8 }}>
-          {card.details}
-        </p>
-
-        {/* Directional icons: show them when user drags beyond certain threshold */}
-        {showWrong && (
+        {showWrongIcon && (
           <img
             src={wrongIcon}
-            alt="Wrong"
+            alt=""
             style={{
               position: 'absolute',
               top: '10px',
@@ -169,10 +124,10 @@ function TinderStack({
             }}
           />
         )}
-        {showCorrect && (
+        {showCorrectIcon && (
           <img
             src={correctIcon}
-            alt="Correct"
+            alt=""
             style={{
               position: 'absolute',
               top: '10px',
@@ -186,11 +141,10 @@ function TinderStack({
     );
   });
 
-  // Exiting card animation uses AnimatePresence
   const ExitCard = activeSwipe ? (
     <motion.div
       key="exit-card"
-      initial={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
+      initial={{ x: 0, y: 0, rotate: 0, scale: 1 }}
       animate={{ 
         x: activeSwipe.direction === 'right' ? cardWidth * 2 
           : activeSwipe.direction === 'left' ? -cardWidth * 2 
@@ -208,8 +162,8 @@ function TinderStack({
       }}
       transition={{ 
         type: 'spring',
-        stiffness: 400,
-        damping: 30
+        stiffness: 300,
+        damping: 40
       }}
       style={{
         position: 'absolute',
@@ -220,17 +174,12 @@ function TinderStack({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: '#fff',
-        padding: '20px',
-        textAlign: 'center',
-        zIndex: visibleCount + 1
+        zIndex: visibleCount + 1,
+        border: '2px solid black'
       }}
-    >
-      {activeSwipe.card.text}
-    </motion.div>
+    />
   ) : null;
 
-  // Calculate visible cards
   const visibleCards = useMemo(() => cards.slice(0, visibleCount), [cards, visibleCount]);
 
   return (

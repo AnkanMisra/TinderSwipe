@@ -1,142 +1,262 @@
-import React, { useState, useEffect } from 'react';
-import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion';
+
+// Optional direction icons (provide your own images)
 import correctIcon from '../assets/images/correct.png';
 import wrongIcon from '../assets/images/wrong.png';
 
-const COLORS = ['#FF6B6B', '#6BCBFF', '#B6FF6B', '#FFD700', '#FF8C00', '#ADFF2F'];
+// You can add more colors or change them as desired
+const COLORS = [
+  '#FF6B6B', '#6BCBFF', '#B6FF6B', '#FFD700', 
+  '#FF8C00', '#ADFF2F', '#9370DB', '#40E0D0'
+];
 
+// Generates a new card with random color and some details
 function getRandomCard(id) {
   const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-  return { id, color, text: `Card ${id}` };
+  return { 
+    id, 
+    color, 
+    text: `Card ${id}`,
+    details: `This is some interesting detail about Card ${id}`
+  };
 }
 
-function TinderStack({ swipeThreshold = 100, visibleCount = 3 }) {
-  const [cards, setCards] = useState(() => {
-    const initial = [];
-    for (let i = 1; i <= 10; i++) {
-      initial.push(getRandomCard(i));
-    }
-    return initial;
-  });
+function TinderStack({ 
+  swipeThreshold = 150, 
+  visibleCount = 3,
+  onSwipe = () => {},
+  cardWidth = 300,
+  cardHeight = 450 
+}) {
+  const [cards, setCards] = useState(() => 
+    Array.from({ length: 10 }, (_, i) => getRandomCard(i + 1))
+  );
   const [currentId, setCurrentId] = useState(11);
-  const [exitingCard, setExitingCard] = useState(null);
-  const [exitingDirection, setExitingDirection] = useState(null);
+  const [activeSwipe, setActiveSwipe] = useState(null);
 
+  // Add a new card to the bottom of the stack
+  const addNewCard = useCallback(() => {
+    setCards(prev => [...prev, getRandomCard(currentId)]);
+    setCurrentId(prev => prev + 1);
+  }, [currentId]);
+
+  // The top card is the one the user can interact with
+  // If cards run low, we add new ones
   useEffect(() => {
     if (cards.length < visibleCount) {
       addNewCard();
     }
-  }, [cards, visibleCount]);
+  }, [cards, visibleCount, addNewCard]);
 
-  const addNewCard = () => {
-    setCards((prev) => [...prev, getRandomCard(currentId)]);
-    setCurrentId((prev) => prev + 1);
+  // Determines swipe direction based on drag offset
+  const determineDirection = (offsetX, offsetY) => {
+    const angle = Math.atan2(offsetY, offsetX) * (180 / Math.PI);
+    // Default direction is 'right'
+    if (angle > 45 && angle <= 135) return 'down';
+    if (angle < -45 && angle >= -135) return 'up';
+    if (offsetX < 0) return 'left';
+    return 'right';
   };
 
-  const handleCardSwipe = (direction) => {
-    const topCard = cards[0];
-    setExitingCard(topCard);
-    setExitingDirection(direction);
-    setCards((prev) => prev.slice(1));
-    addNewCard();
-  };
-
-  const handleExitAnimationComplete = () => {
-    setExitingCard(null);
-    setExitingDirection(null);
-  };
-
-  function VisibleCard({ card, index }) {
+  // The card component
+  const TinderCard = React.memo(({ card, index, totalVisible }) => {
     const x = useMotionValue(0);
-    const rotate = useTransform(x, [-300, 300], [-30, 30]);
+    const y = useMotionValue(0);
 
-    const handleDragEnd = (event, info) => {
-      const offset = info.offset.x;
-      if (offset > swipeThreshold) {
-        handleCardSwipe('right');
-      } else if (offset < -swipeThreshold) {
-        handleCardSwipe('left');
+    // Rotate card slightly as user drags horizontally
+    const rotate = useTransform(x, [-cardWidth, 0, cardWidth], [-20, 0, 20]);
+    const opacity = useTransform(x, [-cardWidth, 0, cardWidth], [0.5, 1, 0.5]);
+    const scale = useTransform(x, [-cardWidth, 0, cardWidth], [0.95, 1, 0.95]);
+
+    const handleDragEnd = (_, info) => {
+      const { offset } = info;
+      const distanceMoved = Math.sqrt(offset.x ** 2 + offset.y ** 2);
+
+      if (distanceMoved > swipeThreshold) {
+        // Determine direction of the swipe
+        const direction = determineDirection(offset.x, offset.y);
+        setActiveSwipe({ direction, card });
+        onSwipe(direction);
+
+        // After a small delay, remove the top card and add a new one
+        setTimeout(() => {
+          setCards(prev => prev.slice(1));
+          addNewCard();
+          setActiveSwipe(null);
+        }, 300);
       } else {
+        // Snap back to center if not swiped far enough
         x.set(0);
+        y.set(0);
       }
     };
 
-    const stackZIndex = visibleCount - index;
-    const yOffset = index * 20; // Each subsequent card is moved 20px further down
+    // Stacking effect: each subsequent card is moved down and is more transparent
+    const stackOffset = index * 20;
+    const backScale = 1 - index * 0.05;
+    const backOpacity = 1 - index * 0.1;
 
-    let animateProps = { x: 0, y: yOffset, scale: 1, rotate: 0, opacity: 1 };
-    if (index === 0 && exitingDirection === 'right') {
-      animateProps = { x: 1000, y: yOffset, scale: 1, rotate: 0, opacity: 0 };
-    } else if (index === 0 && exitingDirection === 'left') {
-      animateProps = { x: -1000, y: yOffset, scale: 1, rotate: 0, opacity: 0 };
-    }
+    // Determine if we should show direction icons
+    const showWrong = x.get() < -50;   // swiping left
+    const showCorrect = x.get() > 50;  // swiping right
+    // You could also add conditions for up/down if you have icons for them.
 
     return (
       <motion.div
-        drag={index === 0 && !exitingCard ? 'x' : false}
-        dragConstraints={{ left: 0, right: 0 }}
+        drag
+        dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+        dragElastic={0.7}
         onDragEnd={handleDragEnd}
-        initial={{ x: 0, y: yOffset, scale: 1, rotate: 0, opacity: 1 }}
-        animate={animateProps}
-        transition={{ duration: 1.0, ease: 'easeInOut' }}
-        onAnimationComplete={() => {
-          if (index === 0 && exitingDirection) {
-            handleExitAnimationComplete();
-          }
+        style={{
+          position: 'absolute',
+          width: `${cardWidth}px`,
+          height: `${cardHeight}px`,
+          borderRadius: '16px',
+          backgroundColor: card.color,
+          top: stackOffset,
+          left: 0,
+          boxShadow: '0 15px 30px rgba(0,0,0,0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+          cursor: 'grab',
+          padding: '20px',
+          textAlign: 'center',
+          x,
+          y,
+          rotate,
+          scale,
+          opacity,
+          zIndex: totalVisible - index
         }}
-        style={{ x, rotate, backgroundColor: card.color, zIndex: stackZIndex }}
-        className="absolute top-0 left-0 w-full h-full rounded-lg shadow-xl flex items-center justify-center text-white text-2xl select-none cursor-grab"
+        initial={{ 
+          scale: backScale,
+          y: stackOffset,
+          opacity: backOpacity
+        }}
+        animate={{ 
+          scale: backScale,
+          y: stackOffset,
+          opacity: backOpacity
+        }}
+        transition={{ 
+          type: 'spring',
+          stiffness: 300,
+          damping: 20
+        }}
       >
-        {card.text}
+        <h2 style={{ fontSize: '2rem', marginBottom: '10px' }}>
+          {card.text}
+        </h2>
+        <p style={{ fontSize: '1rem', opacity: 0.8 }}>
+          {card.details}
+        </p>
 
-        {/* Conditional rendering for swipe indicators */}
-        {exitingDirection === 'left' && (
+        {/* Directional icons: show them when user drags beyond certain threshold */}
+        {showWrong && (
           <img
             src={wrongIcon}
             alt="Wrong"
-            className="absolute top-4 left-4 w-12 h-12"
+            style={{
+              position: 'absolute',
+              top: '10px',
+              left: '10px',
+              width: '40px',
+              height: '40px'
+            }}
           />
         )}
-
-        {exitingDirection === 'right' && (
+        {showCorrect && (
           <img
             src={correctIcon}
             alt="Correct"
-            className="absolute top-4 right-4 w-12 h-12"
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              width: '40px',
+              height: '40px'
+            }}
           />
         )}
       </motion.div>
     );
-  }
+  });
 
-  function ExitingCard({ card, direction }) {
-    const exitX = direction === 'right' ? 1000 : -1000;
-    const exitRotate = direction === 'right' ? 15 : -15;
+  // Exiting card animation uses AnimatePresence
+  const ExitCard = activeSwipe ? (
+    <motion.div
+      key="exit-card"
+      initial={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
+      animate={{ 
+        x: activeSwipe.direction === 'right' ? cardWidth * 2 
+          : activeSwipe.direction === 'left' ? -cardWidth * 2 
+          : activeSwipe.direction === 'down' ? 0 
+          : activeSwipe.direction === 'up' ? 0 
+          : 0,
+        y: activeSwipe.direction === 'down' ? cardHeight * 2 
+          : activeSwipe.direction === 'up' ? -cardHeight * 2 
+          : 0,
+        rotate: activeSwipe.direction === 'right' ? 30 
+          : activeSwipe.direction === 'left' ? -30 
+          : 0,
+        scale: 0.7,
+        opacity: 0
+      }}
+      transition={{ 
+        type: 'spring',
+        stiffness: 400,
+        damping: 30
+      }}
+      style={{
+        position: 'absolute',
+        width: `${cardWidth}px`,
+        height: `${cardHeight}px`,
+        borderRadius: '16px',
+        backgroundColor: activeSwipe.card.color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        padding: '20px',
+        textAlign: 'center',
+        zIndex: visibleCount + 1
+      }}
+    >
+      {activeSwipe.card.text}
+    </motion.div>
+  ) : null;
 
-    return (
-      <motion.div
-        className="absolute top-0 left-0 w-[300px] h-[400px] rounded-xl border border-black shadow-xl flex items-center justify-center text-white text-2xl select-none"
-        style={{ backgroundColor: card.color, zIndex: visibleCount + 1 }}
-        initial={{ x: 0, y: 0, scale: 1, rotate: 0, opacity: 1 }}
-        animate={{ x: exitX, y: 0, scale: 1, rotate: exitRotate, opacity: 0 }}
-        transition={{ duration: 1.0, ease: 'easeInOut' }}
-        onAnimationComplete={handleExitAnimationComplete}
-      >
-        {card.text}
-      </motion.div>
-    );
-  }
-
-  const visibleCards = cards.slice(0, visibleCount);
+  // Calculate visible cards
+  const visibleCards = useMemo(() => cards.slice(0, visibleCount), [cards, visibleCount]);
 
   return (
-    <div className="relative w-[300px] h-[400px] mx-auto overflow-visible">
-      {visibleCards.map((card, i) => (
-        <VisibleCard key={card.id} card={card} index={i} />
-      ))}
-      {exitingCard && (
-        <ExitingCard card={exitingCard} direction={exitingDirection} />
-      )}
+    <div
+      style={{
+        position: 'relative',
+        width: `${cardWidth}px`,
+        height: `${cardHeight}px`,
+        margin: '0 auto',
+        perspective: '1000px'
+      }}
+    >
+      <AnimatePresence>
+        {[...visibleCards].reverse().map((card, i) => {
+          const reversedIndex = visibleCount - i - 1;
+          return (
+            <TinderCard 
+              key={card.id} 
+              card={card} 
+              index={reversedIndex} 
+              totalVisible={visibleCount}
+            />
+          );
+        })}
+        {ExitCard}
+      </AnimatePresence>
     </div>
   );
 }

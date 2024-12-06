@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { motion, useMotionValue, useTransform } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
+import correctIcon from '../assets/images/correct.png';
+import wrongIcon from '../assets/images/wrong.png';
 
 const COLORS = ['#FF6B6B', '#6BCBFF', '#B6FF6B', '#FFD700', '#FF8C00', '#ADFF2F'];
 
@@ -17,71 +19,108 @@ function TinderStack({ swipeThreshold = 100, visibleCount = 3 }) {
     return initial;
   });
   const [currentId, setCurrentId] = useState(11);
-  const [swipeDirection, setSwipeDirection] = useState(null);
+  const [exitingCard, setExitingCard] = useState(null);
+  const [exitingDirection, setExitingDirection] = useState(null);
+
+  useEffect(() => {
+    if (cards.length < visibleCount) {
+      addNewCard();
+    }
+  }, [cards, visibleCount]);
 
   const addNewCard = () => {
     setCards((prev) => [...prev, getRandomCard(currentId)]);
     setCurrentId((prev) => prev + 1);
   };
 
-  const handleSwiped = (direction) => {
+  const handleCardSwipe = (direction) => {
+    const topCard = cards[0];
+    setExitingCard(topCard);
+    setExitingDirection(direction);
     setCards((prev) => prev.slice(1));
     addNewCard();
-    setSwipeDirection(null);
-    console.log(`Card swiped ${direction}`);
   };
 
-  function TinderCard({ card, index }) {
+  const handleExitAnimationComplete = () => {
+    setExitingCard(null);
+    setExitingDirection(null);
+  };
+
+  function VisibleCard({ card, index }) {
     const x = useMotionValue(0);
     const rotate = useTransform(x, [-300, 300], [-30, 30]);
-
-    // Horizontal stacking:
-    // Index 0: no offset
-    // Index 1: slightly to the left (-20px)
-    // Index 2: even more to the left (-40px)
-    // Adjust these values to suit your preferred overlap style.
-    const xOffset = index * -30; 
-    const scale = 1 - index * 0.05; // slightly scale down cards behind
-    const baseOpacity = 1 - index * 0.1; // slightly reduce opacity behind top card
 
     const handleDragEnd = (event, info) => {
       const offset = info.offset.x;
       if (offset > swipeThreshold) {
-        setSwipeDirection('right');
+        handleCardSwipe('right');
       } else if (offset < -swipeThreshold) {
-        setSwipeDirection('left');
+        handleCardSwipe('left');
       } else {
         x.set(0);
       }
     };
 
-    let animateProps = { x: xOffset, y: 0, scale, rotate: 0, opacity: baseOpacity };
-    if (index === 0 && swipeDirection === 'right') {
-      animateProps = { x: 1000, y: 0, scale, rotate: 0, opacity: 0 };
-    } else if (index === 0 && swipeDirection === 'left') {
-      animateProps = { x: -1000, y: 0, scale, rotate: 0, opacity: 0 };
+    const stackZIndex = visibleCount - index;
+    const yOffset = index * 20; // Each subsequent card is moved 20px further down
+
+    let animateProps = { x: 0, y: yOffset, scale: 1, rotate: 0, opacity: 1 };
+    if (index === 0 && exitingDirection === 'right') {
+      animateProps = { x: 1000, y: yOffset, scale: 1, rotate: 0, opacity: 0 };
+    } else if (index === 0 && exitingDirection === 'left') {
+      animateProps = { x: -1000, y: yOffset, scale: 1, rotate: 0, opacity: 0 };
     }
 
     return (
       <motion.div
-        drag={index === 0 && !swipeDirection ? 'x' : false}
+        drag={index === 0 && !exitingCard ? 'x' : false}
         dragConstraints={{ left: 0, right: 0 }}
         onDragEnd={handleDragEnd}
-        initial={{ x: xOffset, y: 0, scale, rotate: 0, opacity: baseOpacity }}
+        initial={{ x: 0, y: yOffset, scale: 1, rotate: 0, opacity: 1 }}
         animate={animateProps}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        transition={{ duration: 1.0, ease: 'easeInOut' }}
         onAnimationComplete={() => {
-          if (index === 0 && swipeDirection) {
-            handleSwiped(swipeDirection);
+          if (index === 0 && exitingDirection) {
+            handleExitAnimationComplete();
           }
         }}
-        style={{
-          x,
-          rotate,
-          backgroundColor: card.color,
-          zIndex: visibleCount - index
-        }}
-        className="absolute top-0 left-0 w-[300px] h-[400px] rounded-lg shadow-xl flex items-center justify-center text-white text-2xl select-none cursor-grab"
+        style={{ x, rotate, backgroundColor: card.color, zIndex: stackZIndex }}
+        className="absolute top-0 left-0 w-full h-full rounded-lg shadow-xl flex items-center justify-center text-white text-2xl select-none cursor-grab"
+      >
+        {card.text}
+
+        {/* Conditional rendering for swipe indicators */}
+        {exitingDirection === 'left' && (
+          <img
+            src={wrongIcon}
+            alt="Wrong"
+            className="absolute top-4 left-4 w-12 h-12"
+          />
+        )}
+
+        {exitingDirection === 'right' && (
+          <img
+            src={correctIcon}
+            alt="Correct"
+            className="absolute top-4 right-4 w-12 h-12"
+          />
+        )}
+      </motion.div>
+    );
+  }
+
+  function ExitingCard({ card, direction }) {
+    const exitX = direction === 'right' ? 1000 : -1000;
+    const exitRotate = direction === 'right' ? 15 : -15;
+
+    return (
+      <motion.div
+        className="absolute top-0 left-0 w-[300px] h-[400px] rounded-xl border border-black shadow-xl flex items-center justify-center text-white text-2xl select-none"
+        style={{ backgroundColor: card.color, zIndex: visibleCount + 1 }}
+        initial={{ x: 0, y: 0, scale: 1, rotate: 0, opacity: 1 }}
+        animate={{ x: exitX, y: 0, scale: 1, rotate: exitRotate, opacity: 0 }}
+        transition={{ duration: 1.0, ease: 'easeInOut' }}
+        onAnimationComplete={handleExitAnimationComplete}
       >
         {card.text}
       </motion.div>
@@ -91,19 +130,13 @@ function TinderStack({ swipeThreshold = 100, visibleCount = 3 }) {
   const visibleCards = cards.slice(0, visibleCount);
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: '300px',   // adjust width as needed
-        height: '400px',
-        margin: '0 auto',
-        overflow: 'visible' // allow cards to overlap outside container if desired
-      }}
-    >
-      {[...visibleCards].reverse().map((card, i) => {
-        const reversedIndex = visibleCount - i - 1;
-        return <TinderCard key={card.id} card={card} index={reversedIndex} />;
-      })}
+    <div className="relative w-[300px] h-[400px] mx-auto overflow-visible">
+      {visibleCards.map((card, i) => (
+        <VisibleCard key={card.id} card={card} index={i} />
+      ))}
+      {exitingCard && (
+        <ExitingCard card={exitingCard} direction={exitingDirection} />
+      )}
     </div>
   );
 }
